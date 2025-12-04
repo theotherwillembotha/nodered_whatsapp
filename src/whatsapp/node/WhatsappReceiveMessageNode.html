@@ -1,0 +1,148 @@
+
+
+<div template-section="onIncludeOnce">
+    <style>
+    </style>
+    <script>
+    const WA_ACCEPT_FIELDS = [
+        { id: "Text",         icon: "fa-font",         label: "Text",          defaultEnabled: true  },
+        { id: "ExtendedText", icon: "fa-align-left",   label: "Extended Text", defaultEnabled: true  },
+        { id: "Image",        icon: "fa-image",        label: "Image",         defaultEnabled: true  },
+        { id: "Video",        icon: "fa-video-camera", label: "Video",         defaultEnabled: true  },
+        { id: "Album",        icon: "fa-th-large",     label: "Album",         defaultEnabled: true  },
+        { id: "Document",     icon: "fa-file",         label: "Document",      defaultEnabled: false },
+        { id: "Contact",      icon: "fa-address-card", label: "Contact",       defaultEnabled: false },
+        { id: "Template",     icon: "fa-th-list",      label: "Template",      defaultEnabled: false },
+        { id: "Interactive",  icon: "fa-hand-o-up",    label: "Interactive",   defaultEnabled: false },
+        { id: "Location",     icon: "fa-map-marker",   label: "Location",      defaultEnabled: false },
+        { id: "LiveLocation", icon: "fa-location-arrow", label: "Live Location", defaultEnabled: false },
+    ];
+    </script>
+</div>
+
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name", { value:"Receive Whatsapp Message", required:true})
+        .addDefault("groupConfig", {type:"WhatsappGroupConfigNode", required:true})
+        .addDefault("eventOutputKey", { value:"payload"})
+        .addDefault("eventOutputType", { value:"msg"})
+        .addDefault("acceptOwnMessages", {value: false})
+        .addDefault("accepts", {value: "[]"})
+        .setIcon("whatsapp.png")
+        .setPaletteLabel("WhatsApp Receive Message")
+        .setLabel(function() { return this.name || "WhatsappReceiveMessage"; })
+        .setColor("#E6FFDA")
+        .addOutputs("message");
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+{
+    let node = this;
+
+    $("#node-input-eventOutputKey").typedInput({
+        types: ["msg", "flow", "global"],
+        typeField: "#node-input-eventOutputType"
+    });
+
+    let accepts = [];
+    try { accepts = JSON.parse(node.accepts || "[]"); } catch(e) {}
+
+    let grid = $('<div style="display:grid; grid-template-columns:1fr 1fr; gap:4px 8px; padding:4px 0;"></div>');
+    $("#wa-accept-rows").append(grid);
+
+    WA_ACCEPT_FIELDS.forEach(function(field) {
+        let saved = accepts.find(function(a) { return a.id === field.id; })
+            || { enabled: field.defaultEnabled };
+
+        let cell = $(
+            '<div style="display:flex; align-items:center; gap:6px;">' +
+                '<input type="checkbox" id="wa-accept-' + field.id + '" style="width:auto; margin:0; flex-shrink:0;">' +
+                '<label for="wa-accept-' + field.id + '" style="margin:0; width:auto;"><i class="fa ' + field.icon + '"></i> ' + field.label + '</label>' +
+            '</div>'
+        );
+        grid.append(cell);
+        $("#wa-accept-" + field.id).prop("checked", saved.enabled);
+    });
+}
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+{
+    let accepts = WA_ACCEPT_FIELDS.map(function(field) {
+        return {
+            id:      field.id,
+            enabled: $("#wa-accept-" + field.id).prop("checked"),
+        };
+    });
+    $("#node-input-accepts").val(JSON.stringify(accepts));
+}
+</script>
+
+<script type="text/javascript" template-section="IncludeEditCancel">
+{
+    let node = this;
+}
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+
+    <div class="form-row editorsectionheading">
+        <i class="w-16 fa fa-envelope"></i> <span>WhatsApp Message</span>
+    </div>
+
+    <div class="editorgroupborder">
+
+        <div class="form-row nomargin">
+            <label for="node-input-groupConfig" style="width:120px;"><i class="fa fa-users"></i> Group</label>
+            <input type="text" id="node-input-groupConfig" placeholder="config">
+        </div>
+
+        <div class="form-row nomargin">
+            <label for="node-input-acceptOwnMessages" style="width:120px;"><i class="fa fa-reply"></i> Own Messages</label>
+            <input type="checkbox" id="node-input-acceptOwnMessages" style="width:auto; margin:0; vertical-align:middle;">
+        </div>
+
+        <div class="form-row nomargin">
+            <label for="node-input-eventOutputKey" style="width:120px;"><i class="fa fa-arrow-right"></i> Output Path</label>
+            <input type="text" id="node-input-eventOutputKey" placeholder="payload">
+            <input type="hidden" id="node-input-eventOutputType">
+        </div>
+
+    </div>
+
+    <div class="form-row editorsectionheading">
+        <i class="w-16 fa fa-filter"></i> <span>Accept</span>
+    </div>
+
+    <div class="editorgroupborder" id="wa-accept-rows">
+    </div>
+
+    <input type="hidden" id="node-input-accepts">
+
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+> **Early development** — this package is still maturing. Some features may be incomplete and diagnostic log output is intentionally verbose for now.
+
+Receives messages from a WhatsApp group and outputs them as Node-RED messages.
+
+### Properties
+
+: *name*         (string) : Display label for this node.
+: *group*        (config) : The WhatsApp Group config node to receive from.
+: *own messages* (bool)   : Whether to forward messages sent by this account.
+: *output path*  (typed)  : Where in the output `msg` to place the WhatsApp message, or which context variable to write to.
+
+### Accept filters
+
+Each message type can be individually enabled or disabled. By default Text, Extended Text, Image, Video, and Album messages are accepted.
+
+### Outputs
+
+: *msg* : Output message. The WhatsApp message is placed at the configured output path.
+</script>
+

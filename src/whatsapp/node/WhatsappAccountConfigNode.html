@@ -1,0 +1,321 @@
+
+<div template-section="onIncludeOnce">
+    <style>
+        .theotherwillembotha-compact-table li {
+            padding-top: 4px;
+            padding-bottom: 4px;
+        }
+    </style>
+
+
+    <script type="text/javascript">
+    // a simple client for interfaceing with the WhatsappService on the backend. Note: this needs to be moved to its own file.
+    let waService = {
+        unlinkAccount : function(nodeID, localConnectionId){
+            return new Promise((resolve, fail) => {
+
+            let request = JSON.stringify({
+                nodeID: nodeID,
+                localConnectionId: localConnectionId
+            });
+
+            $.ajax({
+                url: "whatsapp/unlinkaccount",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+
+        getConnectionDetails:function(nodeID, localConnectionId){
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId
+                });
+
+                $.ajax({
+                    url: "whatsapp/connectiondetails",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+
+        createGroup:function(nodeID, localConnectionId, name){
+            console.log("create group! " + name);
+
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId,
+                    groupName: name
+                });
+
+                $.ajax({
+                    url: "whatsapp/creategroup",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+
+        getGroups:function(nodeID, localConnectionId){
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId
+                });
+
+                $.ajax({
+                    url: "whatsapp/getgroups",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+
+        addUserToGroup:function(nodeID, localConnectionId, userId, groupId, role){
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId,
+                    userId: userId,
+                    groupId: groupId,
+                    role:role
+                });
+
+                $.ajax({
+                    url: "whatsapp/groupadduser",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+
+        updateUserInGroup:function(nodeID, localConnectionId, userId, groupId, role){
+            console.log("update user in group.");
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId,
+                    userId: userId,
+                    groupId: groupId,
+                    role:role
+                });
+
+                $.ajax({
+                    url: "whatsapp/groupupdateuser",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+
+        },
+
+        removeUserFromGroup:function(nodeID, localConnectionId, userId, groupId){
+            console.log("removeUserFromGroup", nodeID, localConnectionId, userId, groupId);
+            return new Promise((resolve, fail) => {
+                let request = JSON.stringify({
+                    nodeID: nodeID,
+                    localConnectionId: localConnectionId,
+                    userId: userId,
+                    groupId: groupId
+                });
+
+                $.ajax({
+                    url: "whatsapp/groupremoveuser",
+                    type: "POST",
+                    data: request,
+                    contentType: "application/json; charset=utf-8",
+                    success: (response) => {
+                        resolve(response);
+                    },
+                    error: (jqXHR, textStatus, errorThrown) => {
+                        fail(errorThrown);
+                    }
+                });
+            });
+        },
+    }
+    </script>
+</div>
+
+
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name", { value:"WhatsApp Account", required:true})
+        .addDefault("accountLinked", {value:false, required:true})
+        .addDefault("localConnectionId", {required:true})
+        .setPaletteLabel("WhatsApp Account")
+        .setLabel(function() {return this.name })
+        .setColor("#25D366")
+        .setLabelStyle("node_label_white")
+</script>
+
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+{
+    let node = this;
+    let $btn = $("#wa-account-link-btn");
+
+    // if the account is already linked, show the Unlink state
+    if(document.getElementById("node-config-input-accountLinked").checked){
+        $btn.html('<i class="fa fa-unlink"></i> Unlink Account');
+    }
+
+    // if we don't have a local connectionId for this node, generate one.
+    if($("#node-config-input-localConnectionId").val() === ""){
+        $("#node-config-input-localConnectionId").val(crypto.randomUUID());
+    }
+
+    let localConnectionId = $("#node-config-input-localConnectionId").val();
+
+    $btn.on("click", () => {
+        $btn.prop("disabled", true);
+
+        if(document.getElementById("node-config-input-accountLinked").checked){
+            waService.unlinkAccount(node.id, localConnectionId)
+                .then(response => {
+                    $btn.prop("disabled", false);
+                    $btn.html('<i class="fa fa-link"></i> Link Account');
+                    document.getElementById("node-config-input-accountLinked").checked = false;
+                    $("#wa-account-qrcode").html("<p>Account unlinked. Remember to remove this device from WhatsApp on your phone.</p>");
+                });
+            return;
+        }
+
+        // register an event handler for QR codes and connection state updates.
+        let eventHandler = function(topic, payload){
+            if(payload.type === "qrcode"){
+                let qrcode =
+                    "<p>Open WhatsApp on your phone, select <strong>Linked Devices</strong> and scan the QR code below.</p><br>" +
+                    payload.qrcode;
+                $("#wa-account-qrcode").html(qrcode);
+                return;
+            }
+
+            if(payload.type === "account_linked"){
+                $("#wa-account-qrcode").html("<p>\u2714 Account linked successfully.</p>");
+                RED.comms.unsubscribe("notification/whatsapp/" + localConnectionId, eventHandler);
+                $btn.prop("disabled", false);
+                $btn.html('<i class="fa fa-unlink"></i> Unlink Account');
+                document.getElementById("node-config-input-accountLinked").checked = true;
+                return;
+            }
+
+            if(payload.type === "account_link_timeout"){
+                $("#wa-account-qrcode").html("<p>\u2718 Link timed out. Click <em>Link Account</em> to try again.</p>");
+                $btn.prop("disabled", false);
+                RED.comms.unsubscribe("notification/whatsapp/" + localConnectionId, eventHandler);
+                return;
+            }
+
+            console.log("unhandled payload type in WhatsappConnectionConfig " + payload.type);
+        };
+        RED.comms.subscribe("notification/whatsapp/" + localConnectionId, eventHandler);
+
+        $.ajax({
+            url: "whatsapp/linkaccount",
+            type: "POST",
+            data: JSON.stringify({ nodeID: node.id, localConnectionId: localConnectionId }),
+            contentType: "application/json; charset=utf-8",
+            error: (jqXHR) => { console.log("linkaccount error", jqXHR); }
+        });
+    });
+}
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+{
+    let node = this;
+
+}
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" />
+    </div>
+
+    <div style="display:none">
+        <input type="text" id="node-config-input-localConnectionId">
+        <input type="checkbox" id="node-config-input-accountLinked">
+    </div>
+
+    <div class="form-row">
+        <label></label>
+        <button type="button" id="wa-account-link-btn" class="red-ui-button">
+            <i class="fa fa-link"></i> Link Account
+        </button>
+    </div>
+
+    <div class="form-row">
+        <label></label>
+        <div id="wa-account-qrcode" style="max-width: 450px;"></div>
+    </div>
+
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+> **Early development** — this package is still maturing. Some features may be incomplete and diagnostic log output is intentionally verbose for now.
+
+Manages a WhatsApp Web session. Handles QR-code pairing and persists session credentials so the connection survives Node-RED restarts.
+
+### Properties
+
+: *name* (string) : Display label for this config node.
+
+### Linking an account
+
+Open the node editor and click **Link Account**. A QR code is displayed — scan it using WhatsApp on your phone (Linked Devices). Once scanned, the session is saved and reconnected automatically on each restart.
+
+To unlink the device, open the editor and click **Unlink Account**, then remove the linked device from WhatsApp on your phone.
+
+### Session storage
+
+Credentials are persisted to `/data/whatsapp/<localConnectionId>/` if the `/data` directory exists (standard Node-RED Docker image), otherwise to `./whatsapp/<localConnectionId>/` relative to the Node-RED working directory.
+</script>

@@ -1,0 +1,415 @@
+
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name", { value:"WhatsApp Group", required:true})
+        .addDefault("accountConfig", {type:"WhatsappAccountConfigNode", required:true})
+        .addDefault("groupId", {value:"", required:true})
+        .setPaletteLabel("WhatsApp Group")
+        .setLabel(function() {return this.name })
+        .setColor("#25D366")
+        .setLabelStyle("node_label_white")
+</script>
+
+<div template-section="onIncludeOnce">
+    <style>
+
+    </style>
+</div>
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+{
+    let node = this;
+    let groupList = [];
+
+    let onGroupChanged = () => {
+        let selectedId = groupSelectionControl.typedInput("value");
+        let selectedGroup = groupList.find(g => g.id === selectedId);
+        if(selectedGroup) {
+            let accountNode;
+            RED.nodes.eachConfig(cfg => { if(cfg.id === accountConfigInput.val()) accountNode = cfg; });
+            let accountName = accountNode ? accountNode.name : "";
+            $("#node-config-input-name").val(accountName ? accountName + " - " + selectedGroup.subject : selectedGroup.subject);
+        }
+    };
+
+    let onGroupMembersLoad = () => {
+        let selectedId = groupSelectionControl.typedInput("value");
+        updateMemberList(selectedId);
+    };
+
+    let updateGroupList = (accountNodeId) => {
+        // map controls.
+        let groupSelectionControl = $("#node-config-input-groupId");
+        let newGroupButton = document.getElementById("wa-group-new-btn");
+
+        // get the localConnectionId.
+        let localConnectionId;
+        RED.nodes.eachConfig(cfg => {
+            if(cfg.id === accountNodeId) {
+                localConnectionId = cfg.localConnectionId;
+            }
+        });
+
+        // if we couldnt find a localConnectionId, it means that the connection does not exist or was not set.
+        if(!localConnectionId){
+            newGroupButton.disabled = true;
+            groupList = [];
+            groupSelectionControl.typedInput('types', [{value:"group", options:[]}]);
+        }
+
+        if(localConnectionId){
+            newGroupButton.disabled = false;
+            // issue request to backend to get the list of groups
+            waService.getGroups(node.id, localConnectionId)
+                .then(groupListResponse => {
+                    groupList = groupListResponse;
+
+                    // rebuild the list of groups...
+                    let groups = groupList.map(groupMeta => { return {
+                        value: groupMeta.id, label:groupMeta.subject
+                    }});
+
+                    // detach change handlers before restoring saved value so the name field is not overwritten on open
+                    groupSelectionControl.off("change", onGroupChanged);
+                    groupSelectionControl.off("change", onGroupMembersLoad);
+                    groupSelectionControl.typedInput('types', [{value:"group", options:groups}]);
+                    groupSelectionControl.typedInput('value', node.groupId);
+                    groupSelectionControl.on("change", onGroupChanged);
+                    groupSelectionControl.on("change", onGroupMembersLoad);
+                    onGroupMembersLoad();
+                })
+                .catch(error => {
+                    console.log(`Error gettting groups: ${name}`, error);
+                })
+        }
+    };
+
+    let updateMemberList = (selectedGroupId) => {
+        let selectedGroup = groupList.find(g => g.id === selectedGroupId);
+
+
+        if(!selectedGroup){
+            //console.log("no group selected");
+            return;
+        }
+
+        console.log("updating member list", selectedGroup);
+
+        let members = selectedGroup.participants ? selectedGroup.participants : [];
+
+        // determine if the linked account can manage roles (must be Admin or SuperAdmin in this group)
+        let me = members.find(m => m.isMe);
+        let canManage = me && (me.role === "Admin" || me.role === "SuperAdmin");
+
+        let groupMemberList = $("#node-input-groupMembers-container");
+        groupMemberList.editableList({
+            sortable: false,
+            removable: true,
+            height: 'auto',
+            scrollOnAdd: true,
+            addButton: 'Add Member',
+            header: $('<div>').append(
+                $.parseHTML(`
+                <div style='width:130px; margin-left:8px; display:inline-block;'>Number</div>
+                <div style='width:140px; display:inline-block;'>Name</div>
+                <div style='width:100px; display:inline-block;'>Role</div>
+                `)
+            ),
+            addItem: function(container, i, _member){
+                let member = _member;
+                console.log("ADD MEMBER: ", member);
+
+                let saveMember = (number, role) => {
+                    // get the localConnectionId from the selected account config.
+                    let localConnectionId;
+                    RED.nodes.eachConfig(cfg => {
+                        if(cfg.id === accountConfigInput.val()) {
+                            localConnectionId = cfg.localConnectionId;
+                        }
+                    });
+                    if(!localConnectionId) return;
+
+                    // format the phone number as a WhatsApp JID: strip leading + and append @s.whatsapp.net
+                    let userId = number.replace(/^\+/, "") + "@s.whatsapp.net";
+                    let groupId = groupSelectionControl.typedInput("value");
+
+                    saveButton.prop("disabled", true);
+                    waService.addUserToGroup(node.id, localConnectionId, userId, groupId, role)
+                        .then(() => {
+                            idField.val(userId);
+                            member.id = userId;
+                            phoneNumberField.prop("disabled", true);
+                            saveButton.hide();
+                        })
+                        .catch(err => {
+                            console.log("Error adding member to group:", err);
+                        })
+                        .finally(() => {
+                            saveButton.prop("disabled", false);
+                        });
+                }
+
+                let onRoleChanged = (role) => {
+                    if(!member.id) return; // new unsaved member — role is submitted with the save button
+
+                    let localConnectionId;
+                    RED.nodes.eachConfig(cfg => {
+                        if(cfg.id === accountConfigInput.val()) {
+                            localConnectionId = cfg.localConnectionId;
+                        }
+                    });
+                    if(!localConnectionId) return;
+
+                    let groupId = groupSelectionControl.typedInput("value");
+                    roleField.prop("disabled", true);
+                    waService.updateUserInGroup(node.id, localConnectionId, member.id, groupId, role)
+                        .catch(err => { console.log("Error updating member role:", err); })
+                        .finally(() => { roleField.prop("disabled", false); });
+                };
+
+                let row =  $('<div/>', {
+                    class: 'form-row',
+                    style: 'display: flex; margin-bottom: 0;'
+                }).appendTo(container);
+
+                // Add the id column
+                let idField = $('<input/>', {
+                    type: 'text',
+                    name: i,
+                    required: true,
+                    style: 'display:none;',
+                    class: 'node-input-member-id-value'
+                }).appendTo(row);
+                idField.val(member.id);
+
+                // Add the Number column
+                let phoneNumberField = $('<input/>', {
+                    type: 'text',
+                    name: i,
+                    required: true,
+                    disabled: (member.id),
+                    style: 'margin-left: 5px; margin-bottom: 0; width:130px',
+                    class: 'node-input-member-phonenumber-value'
+                }).appendTo(row);
+                if(member.id){
+                    phoneNumberField.val(member.id.substring(0, member.id.indexOf("@")));
+                }
+
+                // Add the Name column (read-only)
+                let nameField = $('<span/>', {
+                    style: 'margin-left: 5px; margin-bottom: 0; width:140px; display:inline-block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:34px;',
+                    class: 'node-input-member-name-value'
+                }).appendTo(row);
+                nameField.text(member.name ?? "");
+
+                let isSuperAdmin = member.role === "SuperAdmin";
+                let roleField = $('<select />', {
+                    name: i,
+                    required: false,
+                    disabled: isSuperAdmin || !canManage,
+                    style: 'margin-left: 5px; margin-bottom: 0; width:100px',
+                    class: 'node-input-member-role-value'
+                });
+                // SuperAdmin is a fixed role — show it only for the current SuperAdmin, not as an assignable option
+                if(isSuperAdmin) {
+                    roleField.append($("<option>").attr('value', "SuperAdmin").text("Super Admin"));
+                } else {
+                    Object.entries({ Admin: "Admin", Member: "Member" }).forEach(([key, value]) => {
+                        roleField.append($("<option>").attr('value', key).text(value));
+                    });
+                }
+                roleField.val(member.role);
+                roleField.on("change", () => onRoleChanged(roleField.val()));
+                roleField.appendTo(row);
+
+                // column for the save button.
+                let saveButtonHolder = $(`<span id="middlePlaceholder" style="display: inline-block; width: 18px;"></span>`).appendTo(row)
+                let saveButton = $(`<a 
+                    href="#" 
+                    class="red-ui-editableList-item-approve red-ui-button red-ui-button-small"
+                    style="margin-left: 5px; margin-bottom: 0;margin-top: 8px;">
+                        <i class="fa fa-save"></i>
+                    </a>`
+                ).appendTo(saveButtonHolder);
+
+                // if there is no member.id, show the save button because its a new member.
+                if(member.id){
+                    saveButton.hide();
+                }
+                else{
+                    saveButton.show();
+                }
+                saveButton.on("click", () => { saveMember(phoneNumberField.val(), roleField.val()) } )
+            },
+            removeItem :function(member){
+                if(member.id){
+                    console.log("member removed", member);
+
+                    // get the localConnectionId from the selected account config.
+                    let localConnectionId;
+                    RED.nodes.eachConfig(cfg => {
+                        if(cfg.id === accountConfigInput.val()) {
+                            localConnectionId = cfg.localConnectionId;
+                        }
+                    });
+
+                    // get the groupId
+                    let groupId = groupSelectionControl.typedInput("value");
+
+                    // remove the user from the group.
+                    waService.removeUserFromGroup(node.id, localConnectionId, member.id, groupId);
+                }
+                else{
+                    console.log("member id was not available when trying to remove member");
+                }
+            }
+        });
+        groupMemberList.empty();
+        groupMemberList.editableList('addItems', members);       
+    }
+
+    let setCreateButtonEnabled = (accountNodeId) => {
+        let hasAccount = accountNodeId && accountNodeId !== "_ADD_";
+        $("#wa-group-new-btn").prop("disabled", !hasAccount);
+    };
+
+    // when the accountConfig changes, update the group list and button state.
+    let accountConfigInput = $("#node-config-input-accountConfig");
+    accountConfigInput.on("change", () => {
+        updateGroupList(accountConfigInput.val());
+        setCreateButtonEnabled(accountConfigInput.val());
+    });
+
+    // when the group changes, update the name field and member list separately
+    let groupSelectionControl = $("#node-config-input-groupId");
+    groupSelectionControl.on("change", onGroupChanged);
+    groupSelectionControl.on("change", onGroupMembersLoad);
+    groupSelectionControl.typedInput({
+        types: [{ value: "group",  options: [] }]
+    });
+
+    // set initial button state
+    setCreateButtonEnabled(accountConfigInput.val());
+
+    // show inline create section
+    $("#wa-group-new-btn").on("click", () => {
+        $("#wa-group-new-row").hide();
+        $("#wa-group-create-section").show();
+        $("#wa-new-group-name").val("").focus();
+    });
+
+    // cancel
+    $("#wa-group-create-cancel-btn").on("click", () => {
+        $("#wa-group-create-section").hide();
+        $("#wa-group-new-row").show();
+        $("#wa-new-group-name").val("");
+    });
+
+    // create
+    $("#wa-group-create-confirm-btn").on("click", () => {
+        let groupName = $("#wa-new-group-name").val().trim();
+        if(!groupName) return;
+
+        let localConnectionId;
+        RED.nodes.eachConfig(cfg => {
+            if(cfg.id === accountConfigInput.val()) localConnectionId = cfg.localConnectionId;
+        });
+        if(!localConnectionId) return;
+
+        let $btn = $("#wa-group-create-confirm-btn");
+        $btn.prop("disabled", true);
+
+        waService.createGroup(node.id, localConnectionId, groupName)
+            .then(newGroup => {
+                return waService.getGroups(node.id, localConnectionId).then(groupListResponse => {
+                    groupList = groupListResponse;
+                    let groups = groupList.map(g => ({ value: g.id, label: g.subject }));
+                    groupSelectionControl.typedInput("types", [{ value: "group", options: groups }]);
+                    groupSelectionControl.typedInput("value", newGroup.id);
+                    $("#wa-group-create-section").hide();
+                    $("#wa-group-new-row").show();
+                    $("#wa-new-group-name").val("");
+                });
+            })
+            .catch(err => { console.log("Error creating group:", err); })
+            .finally(() => { $btn.prop("disabled", false); });
+    });
+}
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+{
+    let node = this;
+
+}
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <div class="form-row">
+        <label for="node-config-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-config-input-name" />
+    </div>
+
+    <div class="editorgroupborder">
+
+        <div class="form-row nomargin">
+            <label for="node-config-input-accountConfig"><i class="fa fa-user"></i> Account</label>
+            <input type="text" id="node-config-input-accountConfig" placeholder="config">
+        </div>
+
+        <div class="form-row">
+            <label for="node-config-input-groupId"><i class="fa fa-users"></i> Group</label>
+            <input type="text" id="node-config-input-groupId">
+        </div>
+
+        <div class="form-row" id="wa-group-new-row">
+            <label></label>
+            <button type="button" id="wa-group-new-btn" class="red-ui-button" disabled>
+                <i class="fa fa-plus"></i> Create New Group
+            </button>
+        </div>
+
+        <div id="wa-group-create-section" style="display:none;">
+            <div class="form-row nomargin">
+                <label style="width:120px;"><i class="fa fa-tag"></i> Group Name</label>
+                <input type="text" id="wa-new-group-name" style="width:calc(100% - 200px);">
+            </div>
+            <div class="form-row">
+                <label></label>
+                <button type="button" id="wa-group-create-confirm-btn" class="red-ui-button">
+                    <i class="fa fa-check"></i> Create
+                </button>
+                <button type="button" id="wa-group-create-cancel-btn" class="red-ui-button" style="margin-left:4px;">
+                    <i class="fa fa-times"></i> Cancel
+                </button>
+            </div>
+        </div>
+
+        <div class="form-row" style="font-weight: 600;">
+            <i class="w-16 fa fa-eye"></i> <span>Group Members</span>
+        </div>
+        <div class="form-row">
+            <span>
+                <ol id="node-input-groupMembers-container"></ol>
+            </span>
+        </div>
+    </div>
+
+
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+> **Early development** — this package is still maturing. Some features may be incomplete and diagnostic log output is intentionally verbose for now.
+
+References a WhatsApp group within a linked account. Used as the target for Send Message nodes and the source for Receive Message nodes.
+
+### Properties
+
+: *name*    (string) : Display label for this config node.
+: *account* (config) : The WhatsApp Account config node that owns this group.
+: *group*   (select) : The WhatsApp group to use. The dropdown is populated from the groups available on the selected account.
+
+### Creating a new group
+
+Click **Create New Group** to create a new WhatsApp group from within Node-RED. The new group will appear in the group dropdown once created.
+</script>

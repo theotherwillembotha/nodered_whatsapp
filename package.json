@@ -1,0 +1,71 @@
+{
+  "name": "@theotherwillembotha/node-red-whatsapp",
+  "version": "0.0.55",
+  "description": "Node-RED nodes for WhatsApp messaging via the Baileys library.",
+  "author": "Willem Botha (@theotherwillembotha)",
+  "license": "ISC",
+  "keywords": [
+    "node-red",
+    "whatsapp",
+    "baileys",
+    "messaging",
+    "chat"
+  ],
+  "main": "./build/index.js",
+  "exports": "./build/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npm run clean && tsc && npm run generate-nodes && npm run copy-files",
+    "clean": "rm -rf ./build",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "generate-nodes": "node build/GenerateNodes.js",
+    "copy-files": "cp -r ./icons ./build/"
+  },
+  "files": [
+    "build/",
+    "icons/",
+    "LICENSE",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theotherwillembotha/nodered_whatsapp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/theotherwillembotha/nodered_whatsapp/issues"
+  },
+  "homepage": "https://github.com/theotherwillembotha/nodered_whatsapp#readme",
+  "engines": {
+    "node": ">=18",
+    "nodered": ">=4.0.0"
+  },
+  "dependencies": {
+    "@theotherwillembotha/node-red-plugincore": "^0.0.55",
+    "baileys": "7.0.0-rc11",
+    "handlebars": "^4.7.8",
+    "node-cache": "^5.1.2",
+    "qrcode": "^1.5.4",
+    "sql.js": "^1.13.0",
+    "typeorm": "^0.3.28",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@theotherwillembotha/node-red-plugincore": "../nodered_plugincore",
+    "@types/node": "^22.15.16",
+    "@types/node-red": "~1.3.5",
+    "@types/qrcode": "^1.5.6",
+    "ts-node": "^10.9.2"
+  },
+  "node-red": {
+    "version": ">=4.0.0",
+    "nodes": {
+      "whatsapp": "./build/Nodes.js"
+    },
+    "plugins": {
+      "whatsapp": "./build/Plugins.js"
+    }
+  }
+}
