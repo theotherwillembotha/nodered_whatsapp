@@ -6,7 +6,8 @@ import makeWASocket, {
     proto, useMultiFileAuthState, WAMessage, WAMessageUpdate,
     WASocket,
     GroupParticipant,
-    ParticipantAction
+    ParticipantAction,
+    decryptEventResponse
 } from 'baileys'
 
 import fs from 'fs'
@@ -29,6 +30,7 @@ export interface WAClientConfig {
 export interface WAClientDetails{
     userID:string,
     msisdn:string,
+    name?: string,
 }
 
 export interface GroupMessage {
@@ -88,6 +90,10 @@ export interface WhatsappMessage {
 export interface WhatsappSendMessageRequest {
     text?:any,
     image?:any,
+    video?:any,
+    document?:any,
+    documentName?:string,
+    documentMimetype?:string,
     replyTo?:any,
 }
 
@@ -112,6 +118,7 @@ export class WhatsappClient{
     private store!: WhatsappStore;
     private state!:AuthenticationState
     private messageSubscribers:{[key:string]: (message: WhatsappMessage) => void } = {};
+    private subscriberKeys: Map<Subscription, string> = new Map();
     private logger!: P.Logger<never, boolean>;
     private saveCreds!: () => Promise<void>;
     private groupClients:{[key:string]:GroupClient} = {};
@@ -130,13 +137,14 @@ export class WhatsappClient{
         return this.config;
     }
 
-    public details():WAClientDetails {
-        //@ts-ignore
-        let userID = this.state.creds.me.id.replace(/:\d+(?=@)/, "");
+    public details(): WAClientDetails | null {
+        if (!this.state?.creds?.me) return null;
+        const userID = this.state.creds.me.id.replace(/:\d+(?=@)/, "");
         return {
-            userID: userID,
-            msisdn: userID.substring(0, userID.indexOf("@"))
-        }
+            userID,
+            msisdn: userID.substring(0, userID.indexOf("@")),
+            name: (this.state.creds.me as any).name ?? undefined,
+        };
     }
 
     public onQRCode(listener: (qrcode: string) => void) {
@@ -172,13 +180,16 @@ export class WhatsappClient{
                 listener(message);
             }
         };
+        this.subscriberKeys.set(listener, subscriberID);
         return subscriberID;
     }
 
     public unsubscribe(subscriber:Subscription){
-        Object.entries(this.messageSubscribers)
-            .filter(([key, value]) => value === subscriber)
-            .forEach(([key, value]) => delete this.messageSubscribers[key]);
+        const id = this.subscriberKeys.get(subscriber);
+        if(id) {
+            delete this.messageSubscribers[id];
+            this.subscriberKeys.delete(subscriber);
+        }
     }
 
     private subscribers():((message: WhatsappMessage) => void)[]{
@@ -189,16 +200,26 @@ export class WhatsappClient{
         let result;
 
         if(message.image) {
-            // send image, with optional caption if text is provided
             result = await this.socket.sendMessage(chatId, {
                 image: message.image,
                 caption: message.text
             });
+        } else if(message.video) {
+            result = await this.socket.sendMessage(chatId, {
+                video: message.video,
+                caption: message.text
+            });
+        } else if(message.document) {
+            result = await this.socket.sendMessage(chatId, {
+                document: message.document,
+                fileName: message.documentName ?? 'document',
+                mimetype: message.documentMimetype ?? 'application/octet-stream',
+                caption:  message.text
+            });
         } else if(message.text) {
-            // send text-only message
             result = await this.socket.sendMessage(chatId, { text: message.text });
         } else {
-            throw new Error("Message must contain either text or image");
+            throw new Error("Message must contain text, image, or video");
         }
 
         return { messageId: result!.key.id! };
@@ -465,6 +486,28 @@ export class WhatsappClient{
         }, delayMs);
     }
 
+    /**
+     * Normalises a JID for outbound sending:
+     *   - @lid  → resolves to phone-number JID via the contact store
+     *   - contains "@" → assumed to be a fully-qualified JID; passed through unchanged
+     *   - otherwise → treated as a bare phone number; non-digits are stripped and
+     *                 "@s.whatsapp.net" is appended (works for arbitrary contacts too)
+     */
+    public async resolveJid(jid: string): Promise<string> {
+        if (jid.endsWith("@lid")) {
+            const contact = await this.store.contacts().getByLid(jid);
+            if (contact) return contact.id;
+            console.log(`resolveJid: cannot resolve LID ${jid} — sending as-is`);
+            return jid;
+        }
+
+        if (jid.includes("@")) return jid;
+
+        // Bare phone number — strip formatting characters and construct JID
+        const digits = jid.replace(/\D/g, "");
+        return `${digits}@s.whatsapp.net`;
+    }
+
     public async stop(){
         if(this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);
@@ -625,6 +668,9 @@ export class WhatsappClient{
             message.message?.contactMessage ? MessageType.Contact :
             message.message?.locationMessage ? MessageType.Location :
             message.message?.liveLocationMessage ? MessageType.LiveLocation :
+            message.message?.eventMessage ? MessageType.Event :
+            message.message?.encEventResponseMessage ? MessageType.EventResponse :
+            message.message?.stickerMessage ? MessageType.Sticker :
             message.messageStubType ? MessageType.Stub :
             MessageType.Unknown;
 
@@ -742,12 +788,27 @@ export class WhatsappClient{
         if(messageType === MessageType.Document) {
             const docMsg = message.message?.documentMessage!;
             messageContents = {
-                filename: docMsg.fileName,
-                mimetype: docMsg.mimetype,
+                filename:  docMsg.fileName,
+                mimetype:  docMsg.mimetype,
                 fileLength: docMsg.fileLength ? Number(docMsg.fileLength) : undefined,
                 pageCount: docMsg.pageCount,
-                caption: docMsg.caption,
+                caption:   docMsg.caption,
             };
+
+            if(live) {
+                try {
+                    const documentData = await downloadMediaMessage(
+                        message as WAMessage,
+                        'buffer',
+                        {},
+                        { logger: this.logger, reuploadRequest: this.socket.updateMediaMessage }
+                    );
+                    subscriberPayload = { ...messageContents, data: documentData };
+                } catch(error) {
+                    console.log("Failed to download document:", error);
+                    subscriberPayload = { ...messageContents, data: null };
+                }
+            }
         }
 
         if(messageType === MessageType.Template){
@@ -852,6 +913,97 @@ export class WhatsappClient{
                 longitude:       loc.degreesLongitude,
                 sequenceNumber:  loc.sequenceNumber != null ? String(loc.sequenceNumber) : undefined,
             };
+        }
+
+        if(messageType === MessageType.Event){
+            const evt = message.message?.eventMessage!;
+            const secret = message.message?.messageContextInfo?.messageSecret;
+            messageContents = {
+                name:              evt.name,
+                description:       evt.description,
+                startTime:         evt.startTime ? Number(evt.startTime) : undefined,
+                isCanceled:        evt.isCanceled,
+                hasReminder:       evt.hasReminder,
+                reminderOffsetSec: evt.reminderOffsetSec ? Number(evt.reminderOffsetSec) : undefined,
+                extraGuestsAllowed: evt.extraGuestsAllowed,
+                isScheduleCall:    evt.isScheduleCall,
+                messageSecret:     secret ? Buffer.from(secret).toString('base64') : undefined,
+            };
+        }
+
+        if(messageType === MessageType.EventResponse){
+            const encResp = message.message?.encEventResponseMessage!;
+            const creationKey = encResp.eventCreationMessageKey!;
+
+            const originalMessage = await this.store.messages().get(creationKey.id!);
+            const originalPayload = originalMessage ? JSON.parse(originalMessage.payload) : null;
+            const messageSecretB64: string | undefined = originalPayload?.messageSecret;
+
+            if(!messageSecretB64) {
+                console.log("encEventResponseMessage: missing messageSecret for event", creationKey.id);
+                messageContents = { eventMessageId: creationKey.id, response: "unknown" };
+            } else {
+                try {
+                    // WhatsApp LID-addressed clients use raw LIDs (not resolved phone numbers) in key derivation.
+                    const eventCreatorJid = creationKey.participant || creationKey.remoteJid || "";
+                    const responderJid    = message.key?.participant || message.key?.remoteJid || "";
+
+                    const responseMsg = decryptEventResponse(
+                        { encPayload: encResp.encPayload!, encIv: encResp.encIv! },
+                        {
+                            eventEncKey:    Buffer.from(messageSecretB64, 'base64'),
+                            eventCreatorJid,
+                            eventMsgId:     creationKey.id!,
+                            responderJid,
+                        }
+                    );
+
+                    const responseType = responseMsg.response;
+                    const responseStr =
+                        responseType === proto.Message.EventResponseMessage.EventResponseType.GOING      ? "going" :
+                        responseType === proto.Message.EventResponseMessage.EventResponseType.NOT_GOING  ? "not_going" :
+                        responseType === proto.Message.EventResponseMessage.EventResponseType.MAYBE      ? "maybe" :
+                        "unknown";
+
+                    messageContents = {
+                        eventMessageId:  creationKey.id,
+                        response:        responseStr,
+                        timestampMs:     responseMsg.timestampMs ? Number(responseMsg.timestampMs) : undefined,
+                        extraGuestCount: responseMsg.extraGuestCount ?? undefined,
+                    };
+                } catch(error) {
+                    console.log("encEventResponseMessage: decryption failed", error);
+                    messageContents = { eventMessageId: creationKey.id, response: "unknown" };
+                }
+            }
+        }
+
+        if(messageType === MessageType.Sticker) {
+            const stickerMsg = message.message?.stickerMessage!;
+            messageContents = {
+                mimetype:    stickerMsg.mimetype,
+                width:       stickerMsg.width,
+                height:      stickerMsg.height,
+                fileLength:  stickerMsg.fileLength ? Number(stickerMsg.fileLength) : undefined,
+                isAnimated:  stickerMsg.isAnimated,
+                isLottie:    stickerMsg.isLottie,
+                isAiSticker: stickerMsg.isAiSticker,
+            };
+
+            if(live) {
+                try {
+                    const stickerData = await downloadMediaMessage(
+                        message as WAMessage,
+                        'buffer',
+                        {},
+                        { logger: this.logger, reuploadRequest: this.socket.updateMediaMessage }
+                    );
+                    subscriberPayload = { ...messageContents, data: stickerData };
+                } catch(error) {
+                    console.log("Failed to download sticker:", error);
+                    subscriberPayload = { ...messageContents, data: null };
+                }
+            }
         }
 
         if(messageType === MessageType.Stub){

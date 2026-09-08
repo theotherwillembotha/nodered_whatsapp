@@ -2,12 +2,41 @@
 
 <div template-section="onIncludeOnce">
     <style>
+        .wa-send-action-fields .form-row { margin-bottom: 3px; }
     </style>
     <script>
-    const WA_SEND_FIELDS = [
-        { id: "text",  icon: "fa-font",  label: "Send Text",  types: ["msg", "flow", "global", "str"] },
-        { id: "image", icon: "fa-image", label: "Send Image", types: ["msg", "flow", "global"] },
-    ];
+    var WA_SEND_TYPES = {
+        text: {
+            label: "Text",
+            icon:  "fa-font",
+            fields: [
+                { key: "value", label: "Text",      types: ["msg", "flow", "global", "str"] }
+            ]
+        },
+        image: {
+            label: "Image",
+            icon:  "fa-image",
+            fields: [
+                { key: "value", label: "Image",     types: ["msg", "flow", "global"] }
+            ]
+        },
+        video: {
+            label: "Video",
+            icon:  "fa-video-camera",
+            fields: [
+                { key: "value", label: "Video",     types: ["msg", "flow", "global"] }
+            ]
+        },
+        document: {
+            label: "Document",
+            icon:  "fa-file",
+            fields: [
+                { key: "value",            label: "File",      types: ["msg", "flow", "global"] },
+                { key: "documentName",     label: "Name",      types: ["msg", "flow", "global", "str"] },
+                { key: "documentMimetype", label: "Mime Type", types: ["msg", "flow", "global", "str"] }
+            ]
+        }
+    };
     </script>
 </div>
 
@@ -16,10 +45,7 @@
         .addDefault("name", { value:"Send WhatsApp Message", required:true})
         .addDefault("groupConfig", {type:"WhatsappGroupConfigNode", required:true})
         .addDefault("payloads", {value: "[]", required: false, validate: function(value) {
-            try {
-                var payloads = JSON.parse(value || "[]");
-                return payloads.every(function(p) { return !p.enabled || (p.value !== undefined && p.value !== ""); });
-            } catch(e) { return false; }
+            try { JSON.parse(value || "[]"); return true; } catch(e) { return false; }
         }})
         .setIcon("whatsapp.png")
         .setPaletteLabel("WhatsApp Send Message")
@@ -32,61 +58,97 @@
 {
     let node = this;
 
-    let payloads = [];
-    try { payloads = JSON.parse(node.payloads || "[]"); } catch(e) {}
+    let actionList = $("#wa-send-actions-list");
+    actionList.editableList({
+        sortable: true,
+        removable: true,
+        height: "auto",
+        scrollOnAdd: true,
+        addButton: "Add Message",
+        addItem: function(container, i, action) {
+            action = action || {};
+            let type = action.type || "text";
 
-    WA_SEND_FIELDS.forEach(function(field) {
-        let saved = payloads.find(function(p) { return p.id === field.id; })
-            || { enabled: false, type: field.types[0], value: "" };
+            container.css({ padding: "6px 4px" });
 
-        let row = $(
-            '<div class="form-row nomargin">' +
-                '<label style="width:120px;"><i class="fa ' + field.icon + '"></i> ' + field.label + '</label>' +
-                '<div id="wa-send-row-' + field.id + '" style="display:inline-flex; align-items:center; gap:6px; vertical-align:middle; width:calc(100% - 128px);">' +
-                    '<input type="checkbox" id="wa-send-enabled-' + field.id + '" style="width:auto; margin:0; flex-shrink:0;">' +
-                    '<input type="text" id="wa-send-value-' + field.id + '">' +
-                '</div>' +
-            '</div>'
-        );
-        $("#wa-send-payload-rows").append(row);
+            // ── Type row ──────────────────────────────────────────────────────
+            let typeRow = $('<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">');
+            let iconEl  = $('<i style="width:14px; text-align:center; flex-shrink:0;">').addClass("fa " + (WA_SEND_TYPES[type] ? WA_SEND_TYPES[type].icon : "fa-comment"));
+            let typeSelect = $('<select class="wa-send-action-type" style="flex:0 0 auto;">');
+            Object.keys(WA_SEND_TYPES).forEach(function(key) {
+                typeSelect.append($("<option>").val(key).text(WA_SEND_TYPES[key].label));
+            });
+            typeSelect.val(type);
+            typeRow.append(iconEl).append(typeSelect);
+            container.append(typeRow);
 
-        $("#wa-send-value-" + field.id)
-            .typedInput({ types: field.types })
-            .typedInput("type",  saved.type)
-            .typedInput("value", saved.value);
+            // ── Fields container ──────────────────────────────────────────────
+            let fieldsContainer = $('<div class="wa-send-action-fields">');
+            container.append(fieldsContainer);
 
-        // typedInput inserts its container as a sibling of the (now hidden) input, making it
-        // a direct flex child — apply flex:1 so it expands to fill the remaining row width.
-        $("#wa-send-row-" + field.id + " .red-ui-typedInput-container")
-            .css({ "flex": "1", "min-width": "0", "width": "" });
+            let renderFields = function(selectedType) {
+                fieldsContainer.empty();
+                let typeDef = WA_SEND_TYPES[selectedType];
+                if (!typeDef) return;
 
-        $("#wa-send-enabled-" + field.id).prop("checked", saved.enabled);
+                iconEl.removeClass().addClass("fa " + typeDef.icon);
 
-        // live validation: highlight the typedInput when checkbox is checked but value is empty.
-        var checkFieldValid = function() {
-            var enabled = $("#wa-send-enabled-" + field.id).prop("checked");
-            var value   = $("#wa-send-value-"   + field.id).typedInput("value");
-            var invalid = enabled && (!value || value === "");
-            $("#wa-send-row-" + field.id + " .red-ui-typedInput-container").toggleClass("input-error", invalid);
-        };
-        $("#wa-send-enabled-" + field.id).on("change", checkFieldValid);
-        $("#wa-send-value-"   + field.id).on("change", checkFieldValid);
-        checkFieldValid();
+                typeDef.fields.forEach(function(field) {
+                    let fieldRow = $('<div class="form-row nomargin" style="display:flex; align-items:center; gap:6px;">');
+                    fieldRow.append(
+                        $('<label style="width:70px; margin:0; font-size:0.85em; flex-shrink:0;">').text(field.label)
+                    );
+                    let input = $('<input type="text">').addClass("wa-send-field-" + field.key);
+                    fieldRow.append(input);
+                    fieldsContainer.append(fieldRow);
+
+                    input.typedInput({ types: field.types })
+                         .typedInput("type",  action[field.key + "Type"]  || field.types[0])
+                         .typedInput("value", action[field.key]            || "");
+
+                    fieldRow.find(".red-ui-typedInput-container")
+                            .css({ flex: "1", "min-width": "0", width: "" });
+                });
+            };
+
+            renderFields(type);
+
+            typeSelect.on("change", function() {
+                // Reset saved values when the type changes so stale data isn't carried over.
+                action = { type: $(this).val() };
+                renderFields($(this).val());
+            });
+        }
     });
+
+    let actions = [];
+    try { actions = JSON.parse(node.payloads || "[]"); } catch(e) {}
+    if (actions.length > 0) {
+        actionList.editableList("addItems", actions);
+    }
 }
 </script>
 
 <script type="text/javascript" template-section="onIncludeEditSave">
 {
-    let payloads = WA_SEND_FIELDS.map(function(field) {
-        return {
-            id:      field.id,
-            enabled: $("#wa-send-enabled-" + field.id).prop("checked"),
-            type:    $("#wa-send-value-"   + field.id).typedInput("type"),
-            value:   $("#wa-send-value-"   + field.id).typedInput("value"),
-        };
+    let actions = [];
+    $("#wa-send-actions-list").editableList("items").each(function() {
+        let container  = $(this);
+        let type       = container.find(".wa-send-action-type").val();
+        let typeDef    = WA_SEND_TYPES[type];
+        if (!typeDef) return;
+
+        let action = { type: type };
+        typeDef.fields.forEach(function(field) {
+            let input = container.find(".wa-send-field-" + field.key);
+            if (input.length) {
+                action[field.key]           = input.typedInput("value");
+                action[field.key + "Type"]  = input.typedInput("type");
+            }
+        });
+        actions.push(action);
     });
-    $("#node-input-payloads").val(JSON.stringify(payloads));
+    $("#node-input-payloads").val(JSON.stringify(actions));
 }
 </script>
 
@@ -108,10 +170,11 @@
     </div>
 
     <div class="form-row editorsectionheading">
-        <i class="w-16 fa fa-paper-plane"></i> <span>Send</span>
+        <i class="w-16 fa fa-paper-plane"></i> <span>Messages</span>
     </div>
 
-    <div class="editorgroupborder" id="wa-send-payload-rows">
+    <div class="editorgroupborder">
+        <ol id="wa-send-actions-list"></ol>
     </div>
 
     <input type="hidden" id="node-input-payloads">
@@ -121,22 +184,26 @@
 <script type="text/markdown" template-section="onIncludeDocumentation">
 > **Early development** — this package is still maturing. Some features may be incomplete and diagnostic log output is intentionally verbose for now.
 
-Sends a message to a WhatsApp group.
+Sends one or more messages to a WhatsApp group when triggered.
 
 ### Properties
 
-: *name*        (string) : Display label for this node.
-: *group*       (config) : The WhatsApp Group config node to send to.
+: *name*     (string) : Display label for this node.
+: *group*    (config) : The WhatsApp Group config node to send to.
 
-### Send fields
+### Messages
 
-Each field has a checkbox to enable it and a typed value. Supported value types depend on the field:
+Each row in the **Messages** list is sent as a separate WhatsApp message, in order, when the node is triggered. Rows can be reordered by dragging and removed with the delete button.
 
-- **Send Text** — `msg`, `flow`, `global`, `str`
-- **Send Image** — `msg`, `flow`, `global`
+Select the message type from the dropdown, then fill in the value fields:
+
+- **Text** — a single text value (`msg`, `flow`, `global`, `str` with Handlebars support for `str`)
+- **Image** — a Buffer containing the image data (`msg`, `flow`, `global`)
+- **Video** — a Buffer containing the video data (`msg`, `flow`, `global`)
+- **Document** — three fields: the file Buffer, an optional filename, and an optional MIME type (defaults to `application/octet-stream`)
 
 ### Inputs
 
-: *msg* : Trigger message. Field values are resolved against this message (for `msg` type) or from context.
+: *msg* : Trigger message. `msg`-type field values are resolved against this message.
 </script>
 

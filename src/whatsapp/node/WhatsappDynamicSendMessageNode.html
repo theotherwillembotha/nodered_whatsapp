@@ -1,0 +1,231 @@
+
+
+<div template-section="onIncludeOnce">
+    <style>
+        .wa-dynamic-send-action-fields .form-row { margin-bottom: 3px; }
+    </style>
+    <script>
+    // WA_SEND_TYPES is defined by WhatsappSendMessageNode.html (included in the same page).
+    // Guard against load-order variation with a var declaration — var re-declarations are safe.
+    if (typeof WA_SEND_TYPES === "undefined") {
+        var WA_SEND_TYPES = {
+            text: {
+                label: "Text",
+                icon:  "fa-font",
+                fields: [
+                    { key: "value", label: "Text",      types: ["msg", "flow", "global", "str"] }
+                ]
+            },
+            image: {
+                label: "Image",
+                icon:  "fa-image",
+                fields: [
+                    { key: "value", label: "Image",     types: ["msg", "flow", "global"] }
+                ]
+            },
+            video: {
+                label: "Video",
+                icon:  "fa-video-camera",
+                fields: [
+                    { key: "value", label: "Video",     types: ["msg", "flow", "global"] }
+                ]
+            },
+            document: {
+                label: "Document",
+                icon:  "fa-file",
+                fields: [
+                    { key: "value",            label: "File",      types: ["msg", "flow", "global"] },
+                    { key: "documentName",     label: "Name",      types: ["msg", "flow", "global", "str"] },
+                    { key: "documentMimetype", label: "Mime Type", types: ["msg", "flow", "global", "str"] }
+                ]
+            }
+        };
+    }
+    </script>
+</div>
+
+<script type="text/javascript" template-section="onCompose">
+    node
+        .addDefault("name", { value:"Dynamic Send WhatsApp Message", required:true})
+        .addDefault("accountConfig", {type:"WhatsappAccountConfigNode", required:true})
+        .addDefault("recipient", { value:"payload.sender.id" })
+        .addDefault("recipientType", { value:"msg" })
+        .addDefault("payloads", {value: "[]", required: false, validate: function(value) {
+            try { JSON.parse(value || "[]"); return true; } catch(e) { return false; }
+        }})
+        .setIcon("whatsapp.png")
+        .setPaletteLabel("WhatsApp Dynamic Send")
+        .setLabel(function() {return this.name })
+        .setColor("#E6FFDA")
+        .setInput("message");
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditPrepare">
+{
+    let node = this;
+
+    // ── Recipient typed input ─────────────────────────────────────────────────
+    $("#node-input-recipient").typedInput({
+        types: ["msg", "flow", "global", "str"],
+        typeField: "#node-input-recipientType"
+    });
+
+    // ── Messages editableList ─────────────────────────────────────────────────
+    let actionList = $("#wa-dynamic-send-actions-list");
+    actionList.editableList({
+        sortable: true,
+        removable: true,
+        height: "auto",
+        scrollOnAdd: true,
+        addButton: "Add Message",
+        addItem: function(container, i, action) {
+            action = action || {};
+            let type = action.type || "text";
+
+            container.css({ padding: "6px 4px" });
+
+            // Type row
+            let typeRow = $('<div style="display:flex; align-items:center; gap:8px; margin-bottom:5px;">');
+            let iconEl  = $('<i style="width:14px; text-align:center; flex-shrink:0;">').addClass("fa " + (WA_SEND_TYPES[type] ? WA_SEND_TYPES[type].icon : "fa-comment"));
+            let typeSelect = $('<select class="wa-dynamic-send-action-type" style="flex:0 0 auto;">');
+            Object.keys(WA_SEND_TYPES).forEach(function(key) {
+                typeSelect.append($("<option>").val(key).text(WA_SEND_TYPES[key].label));
+            });
+            typeSelect.val(type);
+            typeRow.append(iconEl).append(typeSelect);
+            container.append(typeRow);
+
+            // Fields container
+            let fieldsContainer = $('<div class="wa-dynamic-send-action-fields">');
+            container.append(fieldsContainer);
+
+            let renderFields = function(selectedType) {
+                fieldsContainer.empty();
+                let typeDef = WA_SEND_TYPES[selectedType];
+                if (!typeDef) return;
+
+                iconEl.removeClass().addClass("fa " + typeDef.icon);
+
+                typeDef.fields.forEach(function(field) {
+                    let fieldRow = $('<div class="form-row nomargin" style="display:flex; align-items:center; gap:6px;">');
+                    fieldRow.append(
+                        $('<label style="width:70px; margin:0; font-size:0.85em; flex-shrink:0;">').text(field.label)
+                    );
+                    let input = $('<input type="text">').addClass("wa-dynamic-send-field-" + field.key);
+                    fieldRow.append(input);
+                    fieldsContainer.append(fieldRow);
+
+                    input.typedInput({ types: field.types })
+                         .typedInput("type",  action[field.key + "Type"]  || field.types[0])
+                         .typedInput("value", action[field.key]            || "");
+
+                    fieldRow.find(".red-ui-typedInput-container")
+                            .css({ flex: "1", "min-width": "0", width: "" });
+                });
+            };
+
+            renderFields(type);
+
+            typeSelect.on("change", function() {
+                action = { type: $(this).val() };
+                renderFields($(this).val());
+            });
+        }
+    });
+
+    let actions = [];
+    try { actions = JSON.parse(node.payloads || "[]"); } catch(e) {}
+    if (actions.length > 0) {
+        actionList.editableList("addItems", actions);
+    }
+}
+</script>
+
+<script type="text/javascript" template-section="onIncludeEditSave">
+{
+    let actions = [];
+    $("#wa-dynamic-send-actions-list").editableList("items").each(function() {
+        let container = $(this);
+        let type      = container.find(".wa-dynamic-send-action-type").val();
+        let typeDef   = WA_SEND_TYPES[type];
+        if (!typeDef) return;
+
+        let action = { type: type };
+        typeDef.fields.forEach(function(field) {
+            let input = container.find(".wa-dynamic-send-field-" + field.key);
+            if (input.length) {
+                action[field.key]          = input.typedInput("value");
+                action[field.key + "Type"] = input.typedInput("type");
+            }
+        });
+        actions.push(action);
+    });
+    $("#node-input-payloads").val(JSON.stringify(actions));
+}
+</script>
+
+<script type="text/javascript" template-section="IncludeEditCancel">
+{
+    let node = this;
+}
+</script>
+
+<script type="text/html" template-section="onIncludeEditForm">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" />
+    </div>
+
+    <div class="form-row editorsectionheading">
+        <i class="w-16 fa fa-envelope"></i> <span>WhatsApp Account</span>
+    </div>
+
+    <div class="editorgroupborder">
+        <div class="form-row nomargin">
+            <label for="node-input-accountConfig" style="width:120px;"><i class="fa fa-user"></i> Account</label>
+            <input type="text" id="node-input-accountConfig" placeholder="config">
+        </div>
+
+        <div class="form-row nomargin">
+            <label for="node-input-recipient" style="width:120px;"><i class="fa fa-paper-plane"></i> Recipient</label>
+            <input type="text" id="node-input-recipient" placeholder="payload.sender.id">
+            <input type="hidden" id="node-input-recipientType">
+        </div>
+    </div>
+
+    <div class="form-row editorsectionheading">
+        <i class="w-16 fa fa-paper-plane"></i> <span>Messages</span>
+    </div>
+
+    <div class="editorgroupborder">
+        <ol id="wa-dynamic-send-actions-list"></ol>
+    </div>
+
+    <input type="hidden" id="node-input-payloads">
+
+</script>
+
+<script type="text/markdown" template-section="onIncludeDocumentation">
+> **Early development** — this package is still maturing. Some features may be incomplete and diagnostic log output is intentionally verbose for now.
+
+Sends one or more WhatsApp messages directly to a recipient resolved at runtime — for example, replying privately to the sender of a group message.
+
+### Properties
+
+: *name*      (string) : Display label for this node.
+: *account*   (config) : The WhatsApp Account config node to send from.
+: *recipient* (typed)  : The target JID resolved from the incoming message, flow, global context, or a static string. Defaults to `msg.payload.sender.id` — the JID of whoever sent the triggering message.
+
+### LID addressing
+
+If the recipient JID ends with `@lid` (newer WhatsApp clients), the node automatically resolves it to the corresponding phone-number JID via the contact store before sending.
+
+### Messages
+
+Each row in the **Messages** list is sent as a separate WhatsApp message, in order. Supports Text, Image, Video, and Document (with optional filename and MIME type).
+
+### Inputs
+
+: *msg* : Trigger message. `msg`-type field values and the recipient are resolved against this message.
+</script>
+

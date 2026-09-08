@@ -15,33 +15,42 @@ export interface WhatsappGroupConfigNodeConfig extends ConfigNodeConfig {
     name:"Whatsapp Group Config Node",
     group:"config",
     sourceFile:SourceUtility.getSourcePath("/build/", "/src/") + "WhatsappGroupConfigNode.html",
-    package: "@theotherwillembotha/nodered_whatsapp",
+    package: "@theotherwillembotha/node-red-whatsapp",
     tags: [ "Whatsapp" ]
 })
 export class WhatsappGroupConfigNode extends ConfigNode<WhatsappGroupConfigNodeConfig> {
     private accountconfigNode: WhatsappAccountConfigNode;
-    private group:GroupClient;
 
     public constructor(node: Node, config: WhatsappGroupConfigNodeConfig){
         super(node, config);
-
         this.accountconfigNode = (NodeManager.RED.nodes.getNode(config.accountConfig) as any).node();
-        this.group = this.accountconfigNode.getGroup(config.groupId)!;
+    }
+
+    private getGroup(): GroupClient | undefined {
+        return this.accountconfigNode.getGroup(this.config().groupId);
     }
 
     public send(message: WhatsappSendMessageRequest) {
-        console.log("Sending message to ", this.group.id());
-        this.group.sendMessage(message);
+        const group = this.getGroup();
+        if(!group) {
+            throw new Error(`WhatsappGroupConfigNode: group client not available — is the account linked and connected?`);
+        }
+        group.sendMessage(message);
     }
 
     public subscribe(subscription:Subscription):Subscription {
-        this.group.subscribe(subscription);
+        const group = this.getGroup();
+        if(!group) {
+            throw new Error(`WhatsappGroupConfigNode: group client not available — is the account linked and connected?`);
+        }
+        group.subscribe(subscription);
         return subscription;
     }
 
     public unsubscribe(subscription:Subscription): void {
-        console.log("unsubscribing from", this.group.id());
-        this.group.unsubscribe(subscription);
-        return;
+        const group = this.getGroup();
+        if(!group) return;
+        console.log("unsubscribing from", group.id());
+        group.unsubscribe(subscription);
     }
 }

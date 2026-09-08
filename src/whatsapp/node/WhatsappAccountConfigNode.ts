@@ -2,7 +2,7 @@
 import { Node } from "node-red";
 import { ConfigNode, ConfigNodeConfig, NodeDescription, SourceUtility } from "@theotherwillembotha/node-red-plugincore";
 import { WhatsappService } from "../service/WhatsappService";
-import { GroupClient, WhatsappClient } from "../service/WhatsappClient";
+import { GroupClient, WhatsappClient, WhatsappSendMessageRequest } from "../service/WhatsappClient";
 
 
 export interface WhatsappAccountConfigNodeConfig extends ConfigNodeConfig {
@@ -15,7 +15,7 @@ export interface WhatsappAccountConfigNodeConfig extends ConfigNodeConfig {
     name:"Whatsapp Config Node",
     group:"config",
     sourceFile:SourceUtility.getSourcePath("/build/", "/src/") + "WhatsappAccountConfigNode.html",
-    package: "@theotherwillembotha/nodered_whatsapp",
+    package: "@theotherwillembotha/node-red-whatsapp",
     tags: [ "Whatsapp" ]
 })
 export class WhatsappAccountConfigNode extends ConfigNode<WhatsappAccountConfigNodeConfig> {
@@ -29,6 +29,12 @@ export class WhatsappAccountConfigNode extends ConfigNode<WhatsappAccountConfigN
     }
 
     public getGroup(groupId: string): GroupClient | undefined {
-        return this.client ? this.client.getGroupClient(groupId) : undefined;
+        const client = WhatsappService.getClient(this.config().localConnectionId);
+        return client ? client.getGroupClient(groupId) : undefined;
+    }
+
+    public async sendMessage(chatId: string, message: WhatsappSendMessageRequest): Promise<void> {
+        const resolvedJid = await this.client.resolveJid(chatId);
+        await this.client.sendMessage(resolvedJid, message);
     }
 }

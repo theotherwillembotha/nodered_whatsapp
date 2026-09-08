@@ -1,4 +1,4 @@
-import { BaseService, FlowDeployment, ServiceDescriptor } from "@theotherwillembotha/node-red-plugincore"
+import { BaseService, ServiceDescription } from "@theotherwillembotha/node-red-plugincore"
 import { NodeAPI, NodeAPISettingsWithData } from "node-red";
 import { Request, response, Response } from "express";
 import { WhatsappClient } from "./WhatsappClient";
@@ -7,14 +7,29 @@ import fs from "fs";
 import QRCode from "qrcode"
 import { ParsedQs } from "qs";
 
+@ServiceDescription({
+    id: "@theotherwillembotha/whatsappservice",
+    name: "WhatsappService",
+    type: "integration-plugin",
+    sourceFile: "./whatsapp/service/WhatsappService",
+})
 export class WhatsappService extends BaseService {
     
     private red!: NodeAPI<NodeAPISettingsWithData>;
     private configDir!: string;
     private configFile!: string;
     private connections: Connection[] = []
-    private static clients:{[key:string]:WhatsappClient}= {};
-    private  tempClients:{[key:string]:WhatsappClient} = {};       // temp clients are used to keep references to clients while linking accounts.
+    private tempClients:{[key:string]:WhatsappClient} = {};       // temp clients are used to keep references to clients while linking accounts.
+
+    // clients is stored in global so that Nodes.js and Plugins.js (which are separate esbuild
+    // bundles containing separate copies of this class) share the same runtime map.
+    private static readonly _CLIENTS_KEY = '__wa_service_clients__';
+    private static clients(): {[key:string]:WhatsappClient} {
+        if(!(global as any)[WhatsappService._CLIENTS_KEY]) {
+            (global as any)[WhatsappService._CLIENTS_KEY] = {};
+        }
+        return (global as any)[WhatsappService._CLIENTS_KEY];
+    }
     
 
     constructor(){
@@ -27,6 +42,8 @@ export class WhatsappService extends BaseService {
 
         // whatsapp client commands.
         let writePermission = red.auth.needsPermission("inject.write");
+        let readPermission  = red.auth.needsPermission("nodes.read");
+        red.httpAdmin.get ("/whatsapp/accounts",        readPermission,  (request, response) => this.getAccounts(request as Request, response as Response));
         red.httpAdmin.post("/whatsapp/linkaccount",     writePermission, (request, response) => this.linkAccount(request as Request<WhatsappLinkAccountRequest>, response as Response));
         red.httpAdmin.post("/whatsapp/unlinkaccount",   writePermission, (request,response) => this.unlinkaccount(request as Request<WhatsappLinkAccountRequest>, response as Response));
         red.httpAdmin.post("/whatsapp/getgroups",       writePermission, (request,response) => this.getGroups(request as Request<WhatsappGetGroupsRequest>, response as Response));
@@ -34,11 +51,8 @@ export class WhatsappService extends BaseService {
         red.httpAdmin.post("/whatsapp/groupadduser",    writePermission, (request,response) => this.groupAddUser(request as Request<WhatsappGroupAddUserRequest>, response as Response));
         red.httpAdmin.post("/whatsapp/groupupdateuser", writePermission, (request,response) => this.groupUpdateUser(request as Request<WhatsappGroupUpdateUserRequest>, response as Response));
         red.httpAdmin.post("/whatsapp/groupremoveuser", writePermission, (request,response) => this.groupRemoveUser(request as Request<WhatsappGroupRemoveUserRequest>, response as Response));
-    
+
         try{
-            // TODO: change the way we determine a suitable sorage location for the whatsapp data.
-            // if the /data folder exists, then this is probably a custom image and we can safely store the information in /data
-            // if it doesnt exist, then just save it to the current working folder.
             if(fs.existsSync("/data")){
                 console.log("Using /data as storage location");
                 this.configDir = "/data/whatsapp";
@@ -49,7 +63,6 @@ export class WhatsappService extends BaseService {
 
             this.configFile = this.configDir + "/connections.json"
 
-            // check if the directory exists.
             if(!fs.existsSync(this.configDir)){
                 fs.mkdirSync(this.configDir);
             }
@@ -67,7 +80,9 @@ export class WhatsappService extends BaseService {
                     localConnectionId:connection.key,
                     fileStorageRoot:this.configDir
                 });
-                WhatsappService.clients[connection.key] = client;
+                WhatsappService.clients()[connection.key] = client;
+                // save account details (name, phone) to connections.json after each reconnect
+                client.onConnectionSuccess(() => this.saveConnectionDetails(connection.key));
                 return client.start();
             }));
         }
@@ -76,12 +91,49 @@ export class WhatsappService extends BaseService {
         }
     }
 
+    private saveConnectionDetails(key: string): void {
+        try {
+            const client = WhatsappService.clients()[key];
+            if (!client) return;
+            const details = client.details();
+            if (!details) return;
+            const conn = this.connections.find(c => c.key === key);
+            if (conn) {
+                conn.name = details.name;
+                conn.phoneNumber = details.msisdn;
+                fs.writeFileSync(this.configFile, JSON.stringify(this.connections, null, 2), {flag:"w+"});
+            }
+        } catch(e) {
+            console.log("saveConnectionDetails failed", e);
+        }
+    }
+
+    private getAccounts(request: Request, response: Response): void {
+        // collect localConnectionIds claimed by WhatsappAccountConfigNodes in the current flow
+        const claimedKeys = new Set<string>();
+        this.red.nodes.eachNode((nodeConfig: any) => {
+            if (nodeConfig.type === 'WhatsappAccountConfigNode' && nodeConfig.localConnectionId) {
+                claimedKeys.add(nodeConfig.localConnectionId);
+            }
+        });
+
+        const accounts = this.connections.map(connection => ({
+            key:         connection.key,
+            name:        connection.name,
+            phoneNumber: connection.phoneNumber,
+            connected:   !!WhatsappService.clients()[connection.key],
+            claimed:     claimedKeys.has(connection.key),
+        }));
+
+        response.send(accounts);
+    }
+
     public deinit(red: NodeAPI<NodeAPISettingsWithData>): Promise<void> | void {
         console.log("STOPPING: WhatsappService");
     }
 
     public static getClient(localConnectionId: string): WhatsappClient {
-        return this.clients[localConnectionId];
+        return WhatsappService.clients()[localConnectionId];
     }
 
     private linkAccount(request:Request<WhatsappLinkAccountRequest>, response:Response) {
@@ -135,17 +187,17 @@ export class WhatsappService extends BaseService {
             // make sure we havent got this connection already.
             let knownConnection = this.connections.find(connection => connection.key === linkRequest.localConnectionId);
             if(!knownConnection){
-                this.connections.push({
-                    key: linkRequest.localConnectionId
-                });
-
+                this.connections.push({ key: linkRequest.localConnectionId });
+                // ensure the new entry exists before saveConnectionDetails tries to update it
                 fs.writeFileSync(this.configFile, JSON.stringify(this.connections, null, 2), {flag:"w+"});
             }
+            // save account details (name, phone) to disk
+            this.saveConnectionDetails(linkRequest.localConnectionId);
 
             // stop the timeout timer, and move client from tempclients to clients.
             clearTimeout(timeoutTimer);
             delete this.tempClients[linkRequest.localConnectionId];
-            WhatsappService.clients[linkRequest.localConnectionId] = client;
+            WhatsappService.clients()[linkRequest.localConnectionId] = client;
 
             // send a notification to the frontend.
             red.events.emit("runtime-event", {
@@ -165,11 +217,11 @@ export class WhatsappService extends BaseService {
         let unlinkAccountRequest:WhatsappUnlinkAccountRequest = request.body;
         
         // get an instance of the client and stop it.
-        let client = WhatsappService.clients[unlinkAccountRequest.localConnectionId];
+        let client = WhatsappService.clients()[unlinkAccountRequest.localConnectionId];
 
         let deleteAccountData = () => {
             // after stopping the client, remove it from the clients list, update the connections file, and remove its storage.
-            delete WhatsappService.clients[unlinkAccountRequest.localConnectionId];
+            delete WhatsappService.clients()[unlinkAccountRequest.localConnectionId];
             this.connections = this.connections.filter(connection => connection.key !== unlinkAccountRequest.localConnectionId);
             fs.writeFileSync(this.configFile, JSON.stringify(this.connections, null, 2), {flag:"w+"});
             fs.rmSync(this.configDir + "/" + unlinkAccountRequest.localConnectionId, { recursive:true});
@@ -186,7 +238,7 @@ export class WhatsappService extends BaseService {
     }
 
     private async getGroups(request: Request<WhatsappGetGroupsRequest>, response: Response):Promise<void> {
-        let client = WhatsappService.clients[request.body.localConnectionId];
+        let client = WhatsappService.clients()[request.body.localConnectionId];
         if(client){
             response.send(await client.groups().getAll());
         }
@@ -196,7 +248,7 @@ export class WhatsappService extends BaseService {
     }
 
     private async createGroup(request: Request<WhatsappCreateGroupRequest>, response: Response):Promise<void> {
-        let client = WhatsappService.clients[request.body.localConnectionId];
+        let client = WhatsappService.clients()[request.body.localConnectionId];
         if(client){
             response.send(await client.groups().createGroup(request.body.groupName));
         }
@@ -206,7 +258,7 @@ export class WhatsappService extends BaseService {
     }
 
     private async groupAddUser(request: Request<WhatsappGroupAddUserRequest>, response: Response):Promise<void> {
-        let client = WhatsappService.clients[request.body.localConnectionId];
+        let client = WhatsappService.clients()[request.body.localConnectionId];
         if(client){
             await client.groups().addUserToGroup(request.body.userId, request.body.groupId, request.body.role as Role);
             response.send({status: "ok"});
@@ -217,7 +269,7 @@ export class WhatsappService extends BaseService {
     }
 
     private async groupUpdateUser(request: Request<WhatsappGroupUpdateUserRequest>, response: Response):Promise<void> {
-        let client = WhatsappService.clients[request.body.localConnectionId];
+        let client = WhatsappService.clients()[request.body.localConnectionId];
         if(client){
             await client.groups().updateUserRole(request.body.userId, request.body.groupId, request.body.role as Role);
             response.send({status: "ok"});
@@ -228,7 +280,7 @@ export class WhatsappService extends BaseService {
     }
 
     private async groupRemoveUser(request: Request<WhatsappGroupRemoveUserRequest>, response: Response):Promise<void> {
-        let client = WhatsappService.clients[request.body.localConnectionId];
+        let client = WhatsappService.clients()[request.body.localConnectionId];
         if(client){
             await client.groups().removeUserFromGroup(request.body.userId, request.body.groupId);
             response.send({status: "ok"});
@@ -238,18 +290,12 @@ export class WhatsappService extends BaseService {
         }
     }
 
-    static override getServiceDescriptor():ServiceDescriptor {
-        return new ServiceDescriptor(
-            "@theotherwillembotha/whatsappservice",
-            "WhatsappService", 
-            "integration-plugin",
-            "./whatsapp/service/WhatsappService",
-            WhatsappService);
-    }
 }
 
 type Connection = {
-    key:string
+    key: string;
+    name?: string;
+    phoneNumber?: string;
 }
 
 type WhatsappRequest = {

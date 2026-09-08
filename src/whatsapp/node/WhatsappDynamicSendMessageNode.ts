@@ -2,7 +2,7 @@ import { Node } from "node-red";
 import { BaseNode, BaseNodeConfig, Message, NodeDescription, NodeManager, onInput, SourceUtility } from "@theotherwillembotha/node-red-plugincore";
 import { Metrics, MetricType, MetricsTemplate, CounterMetric, MetricsTemplateConfig } from "@theotherwillembotha/node-red-plugincore";
 import { Log, Logger, LoggerTemplate, LoggerTemplateConfig } from "@theotherwillembotha/node-red-plugincore";
-import { WhatsappGroupConfigNode } from "./WhatsappGroupConfigNode";
+import { WhatsappAccountConfigNode } from "./WhatsappAccountConfigNode";
 import { WhatsappSendMessageRequest } from "../service/WhatsappClient";
 import Handlebars from "handlebars";
 
@@ -16,16 +16,18 @@ type SendAction = {
     documentMimetypeType?: string;
 }
 
-export interface WhatsappSendMessageNodeConfig extends BaseNodeConfig, MetricsTemplateConfig, LoggerTemplateConfig {
-    groupConfig: string;
+export interface WhatsappDynamicSendMessageNodeConfig extends BaseNodeConfig, MetricsTemplateConfig, LoggerTemplateConfig {
+    accountConfig: string;
+    recipient: string;
+    recipientType: string;
     payloads: string;   // JSON-serialised SendAction[]
 }
 
 @NodeDescription({
-    id:"WhatsappSendMessageNode",
-    name:"Whatsapp Send Message Node",
+    id:"WhatsappDynamicSendMessageNode",
+    name:"Whatsapp Dynamic Send Message Node",
     group:"whatsapp",
-    sourceFile:SourceUtility.getSourcePath("/build/", "/src/") + "WhatsappSendMessageNode.html",
+    sourceFile:SourceUtility.getSourcePath("/build/", "/src/") + "WhatsappDynamicSendMessageNode.html",
     package: "@theotherwillembotha/node-red-whatsapp",
     templates: [
         {template: LoggerTemplate, config: {}},
@@ -33,7 +35,7 @@ export interface WhatsappSendMessageNodeConfig extends BaseNodeConfig, MetricsTe
     ],
     tags: [ "Whatsapp" ]
 })
-export class WhatsappSendMessageNode extends BaseNode<WhatsappSendMessageNodeConfig> {
+export class WhatsappDynamicSendMessageNode extends BaseNode<WhatsappDynamicSendMessageNodeConfig> {
 
     @Logger()
     private log!: Log;
@@ -41,11 +43,11 @@ export class WhatsappSendMessageNode extends BaseNode<WhatsappSendMessageNodeCon
     @Metrics({name:"counter", type:MetricType.Counter, description:"number of messages sent"})
     private counter!: CounterMetric;
 
-    private groupNode: WhatsappGroupConfigNode;
+    private accountNode: WhatsappAccountConfigNode;
 
-    constructor(node: Node, config: WhatsappSendMessageNodeConfig){
+    constructor(node: Node, config: WhatsappDynamicSendMessageNodeConfig){
         super(node, config);
-        this.groupNode = (NodeManager.RED.nodes.getNode(config.groupConfig) as any).node();
+        this.accountNode = (NodeManager.RED.nodes.getNode(config.accountConfig) as any).node();
     }
 
     private resolveField(value: string, valueType: string, message: Message): any {
@@ -59,11 +61,12 @@ export class WhatsappSendMessageNode extends BaseNode<WhatsappSendMessageNodeCon
     }
 
     @onInput()
-    protected onMessageReceived(message: Message): void {
+    protected async onMessageReceived(message: Message): Promise<void> {
         this.counter.inc();
 
-        if(!this.groupNode) {
-            this.node().error("WhatsappSendMessageNode: no group config node found — check the node configuration.");
+        const chatId = this.resolveField(this.config().recipient, this.config().recipientType, message);
+        if(!chatId) {
+            this.log.log({ error: "recipient resolved to empty value — message not sent" });
             return;
         }
 
@@ -95,19 +98,14 @@ export class WhatsappSendMessageNode extends BaseNode<WhatsappSendMessageNodeCon
                     break;
             }
 
-            let logPayload: {[key:string]:any} = {};
+            let logPayload: {[key:string]:any} = { chatId: String(chatId) };
             if(payload.text)     logPayload.text     = payload.text;
             if(payload.image)    logPayload.image    = (payload.image as Buffer)?.length;
             if(payload.video)    logPayload.video    = (payload.video as Buffer)?.length;
             if(payload.document) logPayload.document = (payload.document as Buffer)?.length;
             this.log.log(logPayload);
 
-            try {
-                this.groupNode.send(payload);
-            } catch(e: any) {
-                this.node().error("WhatsappSendMessageNode: failed to send message — " + (e?.message ?? e), message);
-                return;
-            }
+            await this.accountNode.sendMessage(String(chatId), payload);
         }
     }
 }

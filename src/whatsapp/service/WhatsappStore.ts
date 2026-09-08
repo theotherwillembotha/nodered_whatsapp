@@ -261,14 +261,14 @@ class ChatDAO extends DAO<Chat>{
     async getWithParticipants(id: string):Promise<Chat|null> {
         return this.em().findOne(Chat, {
             where: { id },
-            relations: ['participants', 'participants.contact']
+            relations: { participants: { contact: true } }
         });
     }
 
     async getGroups():Promise<Chat[]> {
         return this.em().find(Chat, {
             where: { type: ChatType.Group },
-            relations: ['participants', 'participants.contact']
+            relations: { participants: { contact: true } }
         });
     }
 
@@ -277,7 +277,7 @@ class ChatDAO extends DAO<Chat>{
     }
 
     async delete(chatId: string):Promise<void> {
-        const chat = await this.em().findOne(Chat, { where: { id: chatId }, relations: ['participants'] });
+        const chat = await this.em().findOne(Chat, { where: { id: chatId }, relations: { participants: true } });
         if(chat) {
             await this.em().remove(chat);
         }
@@ -286,7 +286,7 @@ class ChatDAO extends DAO<Chat>{
     async removeParticipants(chatId: string, contactIds: string[]): Promise<void> {
         const chat = await this.em().findOne(Chat, {
             where: { id: chatId },
-            relations: ['participants', 'participants.contact']
+            relations: { participants: { contact: true } }
         });
         if(!chat) return;
         chat.participants = chat.participants.filter(p => !contactIds.includes(p.contact.id));
@@ -296,7 +296,7 @@ class ChatDAO extends DAO<Chat>{
     async updateParticipantRole(chatId: string, contactId: string, role: Role): Promise<void> {
         const chat = await this.em().findOne(Chat, {
             where: { id: chatId },
-            relations: ['participants', 'participants.contact']
+            relations: { participants: { contact: true } }
         });
         if(!chat) return;
         const participant = chat.participants.find(p => p.contact.id === contactId);
@@ -309,7 +309,7 @@ class ChatDAO extends DAO<Chat>{
     async updateParticipantLabel(chatId: string, contactId: string, label: string): Promise<void> {
         const chat = await this.em().findOne(Chat, {
             where: { id: chatId },
-            relations: ['participants', 'participants.contact']
+            relations: { participants: { contact: true } }
         });
         if(!chat) return;
         const participant = chat.participants.find(p => p.contact.id === contactId);
@@ -391,7 +391,7 @@ class MessageDAO extends DAO<Message>{
 
     async create(chat:Chat, id:string, timestamp:number, type:MessageType, payload:string):Promise<Message> {
         // first check if the client exists.
-        let message = await this.em().findOneBy(Message, { id:id, chat:chat });
+        let message = await this.em().findOneBy(Message, { id:id, chat: { id: chat.id } });
         if(message){
             let modified = true;
             if(message.timestamp !== timestamp){
@@ -431,6 +431,9 @@ export enum MessageType {
     Interactive = "Interactive",
     Location = "Location",
     LiveLocation = "LiveLocation",
+    Event = "Event",
+    EventResponse = "EventResponse",
+    Sticker = "Sticker",
 }
 
 

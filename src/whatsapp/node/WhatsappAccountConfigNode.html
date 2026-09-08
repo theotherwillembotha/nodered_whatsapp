@@ -179,6 +179,17 @@
                 });
             });
         },
+
+        getAccounts: function() {
+            return new Promise((resolve, fail) => {
+                $.ajax({
+                    url: "whatsapp/accounts",
+                    type: "GET",
+                    success: (response) => { resolve(response); },
+                    error: (jqXHR, textStatus, errorThrown) => { fail(errorThrown); }
+                });
+            });
+        },
     }
     </script>
 </div>
@@ -200,9 +211,10 @@
 {
     let node = this;
     let $btn = $("#wa-account-link-btn");
+    let isLinked = document.getElementById("node-config-input-accountLinked").checked;
 
     // if the account is already linked, show the Unlink state
-    if(document.getElementById("node-config-input-accountLinked").checked){
+    if(isLinked){
         $btn.html('<i class="fa fa-unlink"></i> Unlink Account');
     }
 
@@ -213,12 +225,51 @@
 
     let localConnectionId = $("#node-config-input-localConnectionId").val();
 
-    $btn.on("click", () => {
+    // --- Claim Account section ---
+    // Only offer claiming if this node is not already linked.
+    if(!isLinked){
+        waService.getAccounts().then(function(accounts) {
+            let unclaimed = accounts.filter(function(a) { return !a.claimed; });
+            if(unclaimed.length === 0) return;
+
+            let $claimSelect = $("#wa-claim-select");
+            $claimSelect.empty();
+            unclaimed.forEach(function(account) {
+                let label = account.name && account.phoneNumber
+                    ? account.name + " (+" + account.phoneNumber + ")"
+                    : account.name || account.phoneNumber || account.key;
+                if(!account.connected) label += " \u26a0 disconnected";
+                $('<option>').val(account.key).text(label).appendTo($claimSelect);
+            });
+
+            $("#wa-claim-section").show();
+            $("#wa-or-separator").show();
+        }).catch(function() { /* backend not ready — ignore */ });
+    }
+
+    $("#wa-claim-btn").on("click", function() {
+        let claimedKey = $("#wa-claim-select").val();
+        if(!claimedKey) return;
+
+        // adopt the claimed account's localConnectionId and mark as linked
+        $("#node-config-input-localConnectionId").val(claimedKey);
+        $("#node-config-input-accountLinked").prop("checked", true);
+
+        $("#wa-claim-section").hide();
+        $("#wa-or-separator").hide();
+        $btn.html('<i class="fa fa-unlink"></i> Unlink Account');
+        $("#wa-account-qrcode").html("<p>\u2714 Account claimed. Deploy to activate.</p>");
+    });
+
+    // --- Link Account button ---
+    $btn.on("click", function() {
         $btn.prop("disabled", true);
+        // re-read localConnectionId in case it was overridden by a claim
+        localConnectionId = $("#node-config-input-localConnectionId").val();
 
         if(document.getElementById("node-config-input-accountLinked").checked){
             waService.unlinkAccount(node.id, localConnectionId)
-                .then(response => {
+                .then(function(response) {
                     $btn.prop("disabled", false);
                     $btn.html('<i class="fa fa-link"></i> Link Account');
                     document.getElementById("node-config-input-accountLinked").checked = false;
@@ -284,6 +335,21 @@
     <div style="display:none">
         <input type="text" id="node-config-input-localConnectionId">
         <input type="checkbox" id="node-config-input-accountLinked">
+    </div>
+
+    <div class="form-row" id="wa-claim-section" style="display:none">
+        <label><i class="fa fa-mobile"></i> Claim</label>
+        <div style="width:70%; display:inline-flex; align-items:center;">
+            <select id="wa-claim-select" style="flex-grow:1; min-width:0;"></select>
+            <button type="button" id="wa-claim-btn" class="red-ui-button" style="margin-left:8px; flex-shrink:0;">
+                <i class="fa fa-check"></i> Claim
+            </button>
+        </div>
+    </div>
+
+    <div class="form-row" id="wa-or-separator" style="display:none">
+        <label></label>
+        <span style="color:#aaa; font-style:italic;">— or link a new account —</span>
     </div>
 
     <div class="form-row">

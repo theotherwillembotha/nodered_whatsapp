@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-whatsapp",
-  "version": "0.0.55",
+  "version": "0.2.0",
   "description": "Node-RED nodes for WhatsApp messaging via the Baileys library.",
   "author": "Willem Botha (@theotherwillembotha)",
   "license": "ISC",
@@ -15,10 +15,11 @@
   "exports": "./build/index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "npm run clean && tsc && npm run generate-nodes && npm run copy-files",
+    "build": "npm run clean && tsc && npm run generate-nodes && npm run bundle && npm run copy-files",
     "clean": "rm -rf ./build",
     "typeorm": "typeorm-ts-node-commonjs",
     "generate-nodes": "node build/GenerateNodes.js",
+    "bundle": "node esbuild.js",
     "copy-files": "cp -r ./icons ./build/"
   },
   "files": [
@@ -43,20 +44,21 @@
     "nodered": ">=4.0.0"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.0.55",
-    "baileys": "7.0.0-rc11",
-    "handlebars": "^4.7.8",
+    "@theotherwillembotha/node-red-plugincore": "^0.2.0",
+    "baileys": "7.0.0-rc14",
+    "handlebars": "^4.7.9",
     "node-cache": "^5.1.2",
     "qrcode": "^1.5.4",
-    "sql.js": "^1.13.0",
-    "typeorm": "^0.3.28",
-    "uuid": "^13.0.0"
+    "sql.js": "^1.14.1",
+    "typeorm": "^1.0.0",
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@theotherwillembotha/node-red-plugincore": "../nodered_plugincore",
     "@types/node": "^22.15.16",
     "@types/node-red": "~1.3.5",
     "@types/qrcode": "^1.5.6",
+    "esbuild": "^0.25.0",
     "ts-node": "^10.9.2"
   },
   "node-red": {

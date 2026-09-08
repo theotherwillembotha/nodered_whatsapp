@@ -23,7 +23,7 @@ export interface WhatsappReceiveMessageNodeConfig extends BaseNodeConfig, Metric
     name:"Whatsapp Receive Message Node",
     group:"whatsapp",
     sourceFile:SourceUtility.getSourcePath("/build/", "/src/") + "WhatsappReceiveMessageNode.html",
-    package: "@theotherwillembotha/nodered_whatsapp",
+    package: "@theotherwillembotha/node-red-whatsapp",
     templates: [
         {template: LoggerTemplate, config: {}},
         {template: MetricsTemplate, config: {}},
