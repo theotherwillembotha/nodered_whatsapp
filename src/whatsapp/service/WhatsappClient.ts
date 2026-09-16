@@ -170,9 +170,7 @@ export class WhatsappClient{
     public subscribe(listener:(message:WhatsappMessage) => void, filter?:WhatsappSubscribeFilter):string {
         let subscriberID:string = uuidv4();
         filter = filter ? filter : {};
-        console.log("subscribe to whatsapp messages", filter);
         this.messageSubscribers[subscriberID] = (message:WhatsappMessage) => {
-            console.log("Received message: ", message);
             if(
                 (!filter.groupId || filter.groupId === message.chat.id) &&
                 (!filter.types || filter.types.length === 0 || filter.types.indexOf(message.type) > -1)

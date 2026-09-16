@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-whatsapp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Node-RED nodes for WhatsApp messaging via the Baileys library.",
   "author": "Willem Botha (@theotherwillembotha)",
   "license": "ISC",
@@ -44,7 +44,7 @@
     "nodered": ">=4.0.0"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.2.0",
+    "@theotherwillembotha/node-red-plugincore": "^0.3.0",
     "baileys": "7.0.0-rc14",
     "handlebars": "^4.7.9",
     "node-cache": "^5.1.2",

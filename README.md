@@ -1,22 +1,11 @@
 # @theotherwillembotha/node-red-whatsapp
 
-Node-RED nodes for WhatsApp messaging via the [Baileys](https://github.com/WhiskeySockets/Baileys) library. Supports sending and receiving messages to/from WhatsApp groups, with persistent session management and per-message-type filtering.
+Node-RED nodes for WhatsApp messaging via the [Baileys](https://github.com/WhiskeySockets/Baileys) library. Supports sending and receiving messages to/from WhatsApp groups and individual contacts, with persistent session management and per-message-type filtering.
 
 ---
 
 > [!WARNING]
 > **This package is in early development.** Many features may be incomplete, unstable, or behave unexpectedly. A significant amount of diagnostic information is currently printed to the Node-RED console — this is intentional while the package matures and will be reduced in future releases. Use with caution in production environments.
-
----
-
-> [!IMPORTANT]
-> **This plugin requires [`@theotherwillembotha/node-red-plugincore`](https://github.com/theotherwillembotha/nodered_plugincore) to be installed.**
->
-> `node-red-plugincore` is declared as a dependency and npm will install it automatically alongside this package. However, due to a [known Node-RED limitation](https://github.com/node-red/node-red/issues/3529), packages that arrive as transitive npm dependencies are only discovered by the Node-RED runtime on the **next startup**.
->
-> **You have two options:**
-> - Install [`@theotherwillembotha/node-red-plugincore`](https://flows.nodered.org/node/@theotherwillembotha/node-red-plugincore) via the palette manager or `npm install` **first**, then install this plugin — both will be available immediately without a restart.
-> - Install this plugin directly — `node-red-plugincore` will be installed automatically alongside it. **Restart Node-RED** once and both packages will be fully loaded.
 
 ---
 
@@ -54,6 +43,8 @@ Manages a WhatsApp Web session. Handles QR-code pairing and persists session cre
 
 **Linking an account** — open the node editor and click **Link Account**. A QR code is displayed; scan it with WhatsApp on your phone (Linked Devices). Once scanned, the session is saved and reconnected automatically on each restart. To unlink, click **Unlink Account** and remove the linked device from WhatsApp on your phone.
 
+**Claiming an existing account** — if a WhatsApp session was linked outside of a config node (e.g. from a previous deployment), unclaimed accounts appear in a dropdown. Select one and click **Claim** to adopt it.
+
 ---
 
 ### WhatsApp Group (config node)
@@ -68,7 +59,7 @@ References a WhatsApp group within a linked account. Used as the target for Send
 | *account* | The WhatsApp Account config node that owns this group |
 | *group*   | The WhatsApp group to use — populated from groups available on the selected account |
 
-Click **Create New Group** to create a new WhatsApp group directly from Node-RED.
+Click **Create New Group** to create a new WhatsApp group directly from Node-RED. The group members list allows adding, removing, and promoting/demoting participants.
 
 ---
 
@@ -83,14 +74,32 @@ Sends a message to a WhatsApp group when triggered by an incoming Node-RED messa
 | *name*  | Display label |
 | *group* | The WhatsApp Group config node to send to |
 
-**Send fields** — each field has an enable checkbox and a typed value. Enable the fields you want to send on each trigger:
+**Messages** — each row in the messages list is sent as a separate WhatsApp message. Supported types:
 
-| Field | Supported types |
-|-------|----------------|
-| Send Text  | `msg`, `flow`, `global`, `str` |
-| Send Image | `msg`, `flow`, `global` |
+| Type | Value sources |
+|------|---------------|
+| Text     | `msg`, `flow`, `global`, `str` |
+| Image    | `msg`, `flow`, `global` |
+| Video    | `msg`, `flow`, `global` |
+| Document | `msg`, `flow`, `global` (with optional filename and MIME type) |
 
-The node resolves each enabled field's value against the incoming message (for `msg` type) or from context, then sends to the group.
+The node resolves each field's value against the incoming message (for `msg` type) or from context, then sends to the group.
+
+---
+
+### WhatsApp Dynamic Send Message
+
+Sends one or more WhatsApp messages to a recipient resolved at runtime — for example, replying directly to the sender of a group message.
+
+| Property | Description |
+|----------|-------------|
+| *name*      | Display label |
+| *account*   | The WhatsApp Account config node to send from |
+| *recipient* | The target JID, resolved from `msg`, `flow`, `global`, or a static string. Defaults to `msg.payload.sender.id` |
+
+If the recipient JID ends with `@lid` (newer WhatsApp addressing), the node automatically resolves it to the corresponding phone-number JID via the contact store before sending.
+
+The messages list supports the same types as Send Message (Text, Image, Video, Document).
 
 ---
 
@@ -107,7 +116,7 @@ Outputs a Node-RED message for each incoming WhatsApp message in a group.
 | *own messages* | Whether to forward messages sent by this account |
 | *output path*  | Where in the output `msg` to place the WhatsApp message (or which `flow`/`global` context variable to write to) |
 
-**Accept filters** — each message type can be individually enabled or disabled. Enabled by default: Text, Extended Text, Image, Video, Album. Available types: Text, Extended Text, Image, Video, Album, Document, Contact, Template, Interactive, Location, Live Location.
+**Accept filters** — each message type can be individually enabled or disabled. Enabled by default: Text, Extended Text, Image, Video, Album. Available types: Text, Extended Text, Image, Video, Album, Document, Contact, Template, Location, Event, Event Response, Sticker.
 
 **Output message** — the WhatsApp message object is placed at the configured output path (default: `msg.payload`). The object includes:
 
@@ -136,10 +145,13 @@ Session credentials and the SQLite message store are written to `/data/whatsapp/
 | Package | Description |
 |---------|-------------|
 | [node-red-plugincore](https://www.npmjs.com/package/@theotherwillembotha/node-red-plugincore) | Core framework |
-| [node-red-telemetry](https://www.npmjs.com/package/@theotherwillembotha/node-red-telemetry) | Structured logging & Prometheus metrics |
+| [node-red-telemetry](https://www.npmjs.com/package/@theotherwillembotha/node-red-telemetry) | Structured logging flow node |
 | [node-red-loki](https://www.npmjs.com/package/@theotherwillembotha/node-red-loki) | Grafana Loki log transport |
+| [node-red-prometheus](https://www.npmjs.com/package/@theotherwillembotha/node-red-prometheus) | Prometheus metrics provider |
 | [node-red-circuitbreaker](https://www.npmjs.com/package/@theotherwillembotha/node-red-circuitbreaker) | Circuit breaker fault tolerance |
 | [node-red-zookeeper](https://www.npmjs.com/package/@theotherwillembotha/node-red-zookeeper) | Apache ZooKeeper integration |
+| [node-red-reolink](https://www.npmjs.com/package/@theotherwillembotha/node-red-reolink) | Reolink camera integration |
+| [node-red-temporal](https://www.npmjs.com/package/@theotherwillembotha/node-red-temporal) | Temporal.io workflow integration |
 | [node-red-whatsapp](https://www.npmjs.com/package/@theotherwillembotha/node-red-whatsapp) | WhatsApp messaging (this package) |
 
 ## License

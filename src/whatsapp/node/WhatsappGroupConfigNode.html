@@ -288,8 +288,9 @@
         types: [{ value: "group",  options: [] }]
     });
 
-    // set initial button state
+    // set initial button state and load groups for the already-selected account
     setCreateButtonEnabled(accountConfigInput.val());
+    updateGroupList(accountConfigInput.val());
 
     // show inline create section
     $("#wa-group-new-btn").on("click", () => {
@@ -340,7 +341,6 @@
 <script type="text/javascript" template-section="onIncludeEditSave">
 {
     let node = this;
-
 }
 </script>
 
@@ -394,8 +394,6 @@
             </span>
         </div>
     </div>
-
-
 </script>
 
 <script type="text/markdown" template-section="onIncludeDocumentation">

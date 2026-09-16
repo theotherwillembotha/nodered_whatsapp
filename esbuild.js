@@ -1,12 +1,10 @@
 const esbuild = require('esbuild');
 const path = require('path');
 
-// Packages that must remain as require() calls at runtime in the container.
+// Only build-time deps and the Node-RED runtime are external.
+// plugincore is NOT external — it is bundled inline for self-contained deployment.
 const external = [
-    // Real Node-RED runtime dep — installed in the container
     'node-red',
-    // Plugincore is a peer dep — volume-mounted in Docker, or installed via npm dependencies.
-    '@theotherwillembotha/node-red-plugincore',
     // plugincore build-time deps — lazy require()s, only needed during node generation
     'jsdom',
     'js-beautify',
