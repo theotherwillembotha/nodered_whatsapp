@@ -1,6 +1,6 @@
 {
   "name": "@theotherwillembotha/node-red-whatsapp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Node-RED nodes for WhatsApp messaging via the Baileys library.",
   "author": "Willem Botha (@theotherwillembotha)",
   "license": "ISC",
@@ -13,6 +13,7 @@
   ],
   "main": "./build/index.js",
   "exports": "./build/index.js",
+  "types": "./build/index.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "npm run clean && tsc && npm run generate-nodes && npm run bundle && npm run copy-files",
@@ -44,7 +45,7 @@
     "nodered": ">=4.0.0"
   },
   "dependencies": {
-    "@theotherwillembotha/node-red-plugincore": "^0.3.0",
+    "@theotherwillembotha/node-red-plugincore": "^0.4.2",
     "baileys": "7.0.0-rc14",
     "handlebars": "^4.7.9",
     "node-cache": "^5.1.2",
