@@ -220,7 +220,7 @@
 
     // if we don't have a local connectionId for this node, generate one.
     if($("#node-config-input-localConnectionId").val() === ""){
-        $("#node-config-input-localConnectionId").val(crypto.randomUUID());
+        $("#node-config-input-localConnectionId").val(RED.nodes.id());
     }
 
     let localConnectionId = $("#node-config-input-localConnectionId").val();
